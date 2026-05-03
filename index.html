@@ -412,6 +412,8 @@ const SUPABASE_ANON_KEY = "%%SUPABASE_ANON_KEY%%";
 
 
 
+
+
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -641,18 +643,25 @@ function renderTable() {
     const stCls = c.status === 'counting' ? 'sb-counting' : c.status === 'declared' ? 'sb-declared' : 'sb-pending';
     const stLbl = c.status === 'counting' ? 'COUNTING/எண்ணிக்கை' : c.status === 'declared' ? '✔ DECLARED/அறிவிப்பு' : 'WAITLIST/காத்திருப்பு';
     
-    // Calculate full rankings for this constituency
-    let ranked = [];
-    if (l && !l.isManual) {
-      const votes = partyVotes[c.id] || {};
-      const roundVotes = {};
-      AK.forEach(a => { roundVotes[a] = (votes[a] || {})[l.maxRound] || 0; });
-      ranked = Object.entries(roundVotes)
-        .sort(([, a], [, b]) => b - a)
-        .map(([key, val]) => ({ key, val, p: PARTIES[key] }));
-    }
+// Calculate full rankings using TOTAL votes across ALL rounds
+let ranked = [];
+let totalLeadVotes = 0;
+let totalMargin = null;
+if (l && !l.isManual) {
+  const votes = partyVotes[c.id] || {};
+  const allRoundTotals = {};
+  AK.forEach(a => {
+    allRoundTotals[a] = Object.values(votes[a] || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+  });
+  ranked = Object.entries(allRoundTotals)
+    .sort(([, a], [, b]) => b - a)
+    .map(([key, val]) => ({ key, val, p: PARTIES[key] }));
+  totalLeadVotes = allRoundTotals[l.leading] || 0;
+  const second = ranked.find(r => r.key !== l.leading);
+  totalMargin = second ? totalLeadVotes - second.val : null;
+}
 
-    const hasVotes = l && !l.isManual;
+const hasVotes = l && !l.isManual;
 
     return `<tr>
       <td style="color:var(--muted);font-size:11px">${c.id}</td>
@@ -662,14 +671,14 @@ function renderTable() {
         ${lp ? `<span class="party-dot" style="background:${lp.color}"></span><span style="color:${lp.color};font-weight:700">${lp.name}</span>${l?.isManual ? '<span class="lo-pin-badge">📌 முன்னிலை மட்டும்</span>' : ''}` : '—'}
       </td>
       <td style="font-weight:700;color:${lp?.color || 'var(--muted)'}">
-        ${hasVotes ? l.leadVotes.toLocaleString('en-IN') : '<span style="color:var(--muted)">—</span>'}
+        ${hasVotes ? totalLeadVotes.toLocaleString('en-IN') : '<span style="color:var(--muted)">—</span>'}
       </td>
       <!-- 2nd Place -->
       <td style="font-size:12px">
         ${hasVotes && ranked[1] ? `<span class="party-dot" style="background:${ranked[1].p.color}"></span><span style="color:${ranked[1].p.color}">${ranked[1].p.name}</span> <br> <span style="color:var(--muted)">${ranked[1].val.toLocaleString('en-IN')}</span>` : '—'}
       </td>
-      <td class="${hasVotes && l.margin > 0 ? 'margin-pos' : ''}">
-        ${hasVotes && l.margin > 0 ? '+' + l.margin.toLocaleString('en-IN') : '<span style="color:var(--muted)">—</span>'}
+      <td class="${hasVotes && totalMargin > 0 ? 'margin-pos' : ''}">
+        ${hasVotes && totalMargin > 0 ? '+' + totalMargin.toLocaleString('en-IN') : '<span style="color:var(--muted)">—</span>'}
       </td>
       <!-- 3rd Place -->
       <td style="font-size:12px">
@@ -1002,7 +1011,6 @@ function renderRoundLeaderView(constId) {
   container.innerHTML = html;
 }
 
-
 async function submitUpdate() {
   const id    = parseInt(document.getElementById('eConst').value);
   const c     = constituencies.find(x => x.id === id);
@@ -1282,16 +1290,52 @@ function renderSummary() {
 
 // ── EXPORT CSV ───────────────────────────────────────────
 function exportCSV() {
-  const rows = [['No','Constituency','District','Status','MaxRound','LeadingParty','LeadVotes','2ndParty','2ndVotes','Margin']];
+  const rows = [['No','Constituency','District','Status','MaxRound',
+    'LeadingParty','LeadVotes(Total)',
+    '2ndParty','2ndVotes(Total)',
+    'Margin(Total)',
+    '3rdParty','3rdVotes(Total)',
+    '4thParty','4thVotes(Total)']];
+
   constituencies.forEach(c => {
-    const l = getLeader(c.id);
-    rows.push([c.id, c.name, c.district, c.status, l?.maxRound||0,
-      l ? PARTIES[l.leading]?.name : '', l?.leadVotes||0,
-      l?.second ? PARTIES[l.second]?.name : '', l?.secondVotes||0, l?.margin||0]);
+    const l     = getLeader(c.id);
+    const votes = partyVotes[c.id] || {};
+
+    // Build all-round totals per party
+    const allRoundTotals = {};
+    AK.forEach(a => {
+      allRoundTotals[a] = Object.values(votes[a] || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+    });
+    const ranked = Object.entries(allRoundTotals)
+      .sort(([, a], [, b]) => b - a)
+      .map(([key, val]) => ({ name: PARTIES[key]?.name || key, val }));
+
+    const grandTotal = ranked.reduce((s, r) => s + r.val, 0);
+    const leadTotalVotes = l ? (allRoundTotals[l.leading] || 0) : 0;
+    const secondTotalVotes = ranked[1]?.val || 0;
+    const margin = grandTotal > 0 ? leadTotalVotes - secondTotalVotes : 0;
+
+    rows.push([
+      c.id,
+      c.name,
+      c.district,
+      c.status,
+      l?.maxRound || 0,
+      l ? PARTIES[l.leading]?.name : '',
+      leadTotalVotes,
+      ranked[1]?.name || '',
+      ranked[1]?.val  || 0,
+      grandTotal > 0 ? margin : '',
+      ranked[2]?.name || '',
+      ranked[2]?.val  || 0,
+      ranked[3]?.name || '',
+      ranked[3]?.val  || 0
+    ]);
   });
-  const csv = rows.map(r => r.join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
+
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a   = document.createElement('a');
+  a.href    = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
   a.download = 'TamilJanam_TN2026_' + new Date().toISOString().slice(0,10) + '.csv';
   a.click();
 }
