@@ -306,6 +306,8 @@ tr:hover td{background:var(--bg3);}
           <th>#</th><th>தொகுதி</th><th>மாவட்டம்</th>
           <th>முன்னிலை கட்சி</th><th>மொத்த வாக்கு</th>
           <th>2வது கட்சி</th><th>வித்தியாசம்</th>
+          <th>3வது கட்சி</th> <!-- Added -->
+          <th>4வது கட்சி</th> <!-- Added -->
           <th>சுற்று</th><th>நிலை</th><th></th>
         </tr></thead>
         <tbody id="tbody"></tbody>
@@ -619,6 +621,7 @@ function updateScoreboard() {
 }
 
 // ── RESULTS TABLE ────────────────────────────────────────
+// ── RESULTS TABLE ────────────────────────────────────────
 function renderTable() {
   const srch  = (document.getElementById('srch')?.value || '').toLowerCase();
   const fAl   = document.getElementById('fAl')?.value   || '';
@@ -636,23 +639,46 @@ function renderTable() {
   document.getElementById('tbody').innerHTML = rows.map(c => {
     const l  = getLeader(c.id);
     const lp = l ? PARTIES[l.leading] || PARTIES.oth : null;
-    const sp = l?.second ? PARTIES[l.second] || PARTIES.oth : null;
     const stCls = c.status === 'counting' ? 'sb-counting' : c.status === 'declared' ? 'sb-declared' : 'sb-pending';
     const stLbl = c.status === 'counting' ? 'COUNTING/எண்ணிக்கை' : c.status === 'declared' ? '✔ DECLARED/அறிவிப்பு' : 'WAITLIST/காத்திருப்பு';
+    
+    // Calculate full rankings for this constituency
+    let ranked = [];
+    if (l && !l.isManual) {
+      const votes = partyVotes[c.id] || {};
+      const roundVotes = {};
+      AK.forEach(a => { roundVotes[a] = (votes[a] || {})[l.maxRound] || 0; });
+      ranked = Object.entries(roundVotes)
+        .sort(([, a], [, b]) => b - a)
+        .map(([key, val]) => ({ key, val, p: PARTIES[key] }));
+    }
+
     const hasVotes = l && !l.isManual;
+
     return `<tr>
       <td style="color:var(--muted);font-size:11px">${c.id}</td>
       <td style="font-weight:600">${c.name}</td>
       <td style="font-size:12px;color:var(--muted)">${c.district}</td>
-      <td>${lp ? `<span class="party-dot" style="background:${lp.color}"></span><span style="color:${lp.color};font-weight:700">${lp.name}</span>${l?.isManual ? '<span class="lo-pin-badge">📌 முன்னிலை மட்டும் <br> (Votes count is not given) </br></span>' : ''}` : '—'}</td>
+      <td>
+        ${lp ? `<span class="party-dot" style="background:${lp.color}"></span><span style="color:${lp.color};font-weight:700">${lp.name}</span>${l?.isManual ? '<span class="lo-pin-badge">📌 முன்னிலை மட்டும்</span>' : ''}` : '—'}
+      </td>
       <td style="font-weight:700;color:${lp?.color || 'var(--muted)'}">
         ${hasVotes ? l.leadVotes.toLocaleString('en-IN') : '<span style="color:var(--muted)">—</span>'}
       </td>
+      <!-- 2nd Place -->
       <td style="font-size:12px">
-        ${hasVotes && sp ? `<span class="party-dot" style="background:${sp.color}"></span><span style="color:${sp.color}">${sp.name}</span> <span style="color:var(--muted)">${l.secondVotes.toLocaleString('en-IN')}</span>` : '<span style="color:var(--muted)">—</span>'}
+        ${hasVotes && ranked[1] ? `<span class="party-dot" style="background:${ranked[1].p.color}"></span><span style="color:${ranked[1].p.color}">${ranked[1].p.name}</span> <br> <span style="color:var(--muted)">${ranked[1].val.toLocaleString('en-IN')}</span>` : '—'}
       </td>
       <td class="${hasVotes && l.margin > 0 ? 'margin-pos' : ''}">
         ${hasVotes && l.margin > 0 ? '+' + l.margin.toLocaleString('en-IN') : '<span style="color:var(--muted)">—</span>'}
+      </td>
+      <!-- 3rd Place -->
+      <td style="font-size:12px">
+        ${hasVotes && ranked[2] ? `<span class="party-dot" style="background:${ranked[2].p.color}"></span><span style="color:${ranked[2].p.color}">${ranked[2].p.name}</span> <br> <span style="color:var(--muted)">${ranked[2].val.toLocaleString('en-IN')}</span>` : '—'}
+      </td>
+      <!-- 4th Place -->
+      <td style="font-size:12px">
+        ${hasVotes && ranked[3] ? `<span class="party-dot" style="background:${ranked[3].p.color}"></span><span style="color:${ranked[3].p.color}">${ranked[3].p.name}</span> <br> <span style="color:var(--muted)">${ranked[3].val.toLocaleString('en-IN')}</span>` : '—'}
       </td>
       <td>${l && l.maxRound > 0 ? `<span style="background:var(--bjp);color:#fff;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700">R${l.maxRound}</span>` : '—'}</td>
       <td><span class="status-badge ${stCls}">${stLbl}</span></td>
@@ -660,7 +686,7 @@ function renderTable() {
     </tr>`;
   }).join('');
 }
-
+  f
 function populateDistFilter() {
   const dists = [...new Set(constituencies.map(c => c.district))].sort();
   const sel = document.getElementById('fDist');
