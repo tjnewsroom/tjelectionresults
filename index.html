@@ -973,34 +973,46 @@ function renderRoundLeaderView(constId) {
   // ── Party Totals Section (only if any votes exist) ──────────────────────
   if (hasAnyVotes) {
     const maxTotal = Math.max(...Object.values(partyTotals));
+    const sortedParties = AK.filter(a => partyTotals[a] > 0)
+      .sort((a, b) => partyTotals[b] - partyTotals[a]);
 
     html += `
       <div style="margin-top:10px;background:rgba(232,185,74,.05);border:1px solid rgba(232,185,74,.2);border-radius:7px;padding:10px 12px;">
-        <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:9px;">
+        <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:10px;">
           📊 மொத்த வாக்கு — All Rounds Total
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;">
-          ${AK.map(a => {
+
+        <!-- Column headers -->
+        <div style="display:grid;grid-template-columns:${sortedParties.map(() => '1fr').join(' ')};gap:6px;margin-bottom:6px;">
+          ${sortedParties.map(a => {
+            const p = PARTIES[a];
+            return `<div style="text-align:center;font-size:10px;color:${p.color};font-weight:700;">${p.name}</div>`;
+          }).join('')}
+        </div>
+
+        <!-- Vertical bars -->
+        <div style="display:grid;grid-template-columns:${sortedParties.map(() => '1fr').join(' ')};gap:6px;align-items:flex-end;height:80px;">
+          ${sortedParties.map(a => {
             const total = partyTotals[a];
-            if (total === 0) return ''; // skip parties with zero votes
-            const pct   = maxTotal > 0 ? (total / maxTotal * 100).toFixed(1) : 0;
-            const pctOfAll = grandTotal > 0 ? (total / grandTotal * 100).toFixed(1) : 0;
+            const pct   = maxTotal > 0 ? (total / maxTotal * 100) : 0;
             const p     = PARTIES[a];
             return `
-              <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:55px;font-size:11px;color:${p.color};font-weight:700;flex-shrink:0;">${p.name}</div>
-                <div style="flex:1;background:var(--bg3);border-radius:4px;height:10px;overflow:hidden;">
-                  <div style="width:${pct}%;height:100%;background:${p.color};border-radius:4px;transition:width .6s ease;"></div>
-                </div>
-                <div style="width:70px;text-align:right;font-size:11px;font-weight:700;color:${p.color};flex-shrink:0;">
-                  ${total.toLocaleString('en-IN')}
-                </div>
-                <div style="width:38px;text-align:right;font-size:10px;color:var(--muted);flex-shrink:0;">
-                  ${pctOfAll}%
-                </div>
+              <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:80px;gap:3px;">
+                <div style="font-size:10px;color:var(--muted);">${(total/grandTotal*100).toFixed(1)}%</div>
+                <div style="width:100%;height:${Math.max(pct * 0.62, 4).toFixed(1)}px;background:${p.color};border-radius:3px 3px 0 0;min-height:4px;transition:height .6s ease;"></div>
               </div>`;
           }).join('')}
         </div>
+
+        <!-- Vote counts row -->
+        <div style="display:grid;grid-template-columns:${sortedParties.map(() => '1fr').join(' ')};gap:6px;margin-top:5px;border-top:1px solid var(--border);padding-top:6px;">
+          ${sortedParties.map(a => {
+            const p = PARTIES[a];
+            return `<div style="text-align:center;font-size:11px;font-weight:700;color:${p.color};">${partyTotals[a].toLocaleString('en-IN')}</div>`;
+          }).join('')}
+        </div>
+
+        <!-- Grand total -->
         <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:11px;">
           <span style="color:var(--muted)">மொத்தம் (Grand Total)</span>
           <span style="color:var(--text);font-weight:700;">${grandTotal.toLocaleString('en-IN')}</span>
