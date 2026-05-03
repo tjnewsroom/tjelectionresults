@@ -411,6 +411,7 @@ const SUPABASE_URL      = "%%SUPABASE_URL%%"
 const SUPABASE_ANON_KEY = "%%SUPABASE_ANON_KEY%%";
 
 
+
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -969,43 +970,64 @@ async function submitUpdate() {
   const status = document.getElementById('eSt').value;
   const notes  = document.getElementById('eNotes').value.trim();
 
-  // ── 1. Leading party is REQUIRED ──────────────────────
-  const selectedLeader = document.querySelector(`input[name="loParty_${id}"]:checked`)?.value;
+ // ── 1. Read votes ───────────────────────────
+const voteValues = {};
+AK.forEach(a => {
+  const el = document.getElementById('pv_' + a);
+  voteValues[a] = el?.value?.trim() !== '' ? parseInt(el.value) || 0 : 0;
+});
+const totalVotesEntered = Object.values(voteValues).reduce((s, v) => s + v, 0);
+
+// ── 2. Get selected leader ─────────────────
+let selectedLeader = document.querySelector(`input[name="loParty_${id}"]:checked`)?.value;
+
+// ── 3. If votes exist ──────────────────────
+if (totalVotesEntered > 0) {
+  const sorted = Object.entries(voteValues).sort(([, a], [, b]) => b - a);
+  const highestParty = sorted[0][0];
+
+  // Case 2: No leader → auto select + toast
+  if (!selectedLeader) {
+    const radio = document.querySelector(`input[name="loParty_${id}"][value="${highestParty}"]`);
+    if (radio) radio.checked = true;
+
+    selectedLeader = highestParty;
+
+    showToast(`ℹ️ ${PARTIES[highestParty].name} முன்னிலை — auto தேர்வு செய்யப்பட்டது`, 'info');
+  }
+
+  // Case 3: Wrong leader → error
+  else if (highestParty !== selectedLeader) {
+    const vm = document.getElementById('loValidationMsg');
+    if (vm) {
+      vm.textContent = `❌ வாக்கு அடிப்படையில் ${PARTIES[highestParty].name} முன்னிலையில் உள்ளது — சரிபார்க்கவும்`;
+      vm.style.display = 'block';
+    }
+
+    showToast(`❌ ${PARTIES[highestParty].name} தான் முன்னிலை`, 'err');
+    return;
+  }
+
+  // Clear message
+  const vm = document.getElementById('loValidationMsg');
+  if (vm) vm.style.display = 'none';
+}
+
+// ── 4. If NO votes → leader is required ───
+else {
   if (!selectedLeader) {
     const vm = document.getElementById('loValidationMsg');
     if (vm) {
       vm.textContent = '⚠️ முன்னிலை கட்சி தேர்வு செய்யவில்லை — கட்டாயம் தேர்வு செய்க';
-      vm.style.cssText = 'display:block;margin-top:8px;font-size:12px;padding:6px 10px;border-radius:5px;background:rgba(230,57,70,.15);color:var(--red);border:1px solid rgba(230,57,70,.3)';
+      vm.style.display = 'block';
     }
+
     showToast('முன்னிலை கட்சி தேர்வு செய்க!', 'err');
     return;
   }
+}
 
-  // ── 2. Read vote counts (all optional — 0 if blank) ───
-  const voteValues = {};
-  AK.forEach(a => {
-    const el = document.getElementById('pv_' + a);
-    voteValues[a] = el?.value?.trim() !== '' ? parseInt(el.value) || 0 : 0;
-  });
-  const totalVotesEntered = Object.values(voteValues).reduce((s, v) => s + v, 0);
-
-  // ── 3. Validate: if votes given, leading party must match highest ──
-  if (totalVotesEntered > 0) {
-    const sorted = Object.entries(voteValues).sort(([, a], [, b]) => b - a);
-    const highestParty = sorted[0][0];
-    if (highestParty !== selectedLeader) {
-      const vm = document.getElementById('loValidationMsg');
-      if (vm) {
-        vm.textContent = `❌ வாக்கு எண்ணிக்கையில் ${PARTIES[highestParty].name} அதிகம் உள்ளது — முன்னிலை கட்சியை சரிபார்க்கவும்`;
-        vm.style.cssText = 'display:block;margin-top:8px;font-size:12px;padding:6px 10px;border-radius:5px;background:rgba(230,57,70,.15);color:var(--red);border:1px solid rgba(230,57,70,.3)';
-      }
-      showToast(`❌ வாக்கு: ${PARTIES[highestParty].name} முன்னிலை — Leading party சரிசெய்க`, 'err');
-      return;
-    }
-    // Validation passed — clear error
-    const vm = document.getElementById('loValidationMsg');
-    if (vm) vm.style.display = 'none';
-  }
+// ✅ Continue submit...
 
 // ── FIX 2: submitUpdate — override check uses ONLY party_votes ──────────
 // manual_leader_round stores the LATEST round for display purposes only.
