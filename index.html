@@ -411,7 +411,6 @@ const SUPABASE_URL      = "%%SUPABASE_URL%%"
 const SUPABASE_ANON_KEY = "%%SUPABASE_ANON_KEY%%";
 
 
-
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -621,7 +620,6 @@ function updateScoreboard() {
 }
 
 // ── RESULTS TABLE ────────────────────────────────────────
-// ── RESULTS TABLE ────────────────────────────────────────
 function renderTable() {
   const srch  = (document.getElementById('srch')?.value || '').toLowerCase();
   const fAl   = document.getElementById('fAl')?.value   || '';
@@ -686,7 +684,7 @@ function renderTable() {
     </tr>`;
   }).join('');
 }
-  f
+
 function populateDistFilter() {
   const dists = [...new Set(constituencies.map(c => c.district))].sort();
   const sel = document.getElementById('fDist');
