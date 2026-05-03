@@ -886,12 +886,10 @@ function renderRoundLeaderView(constId) {
   const c     = constituencies.find(x => x.id === constId);
   const votes = partyVotes[constId] || {};
 
-  // Collect all rounds that have votes
   const voteRounds = [...new Set(
     Object.keys(votes).flatMap(a => Object.keys(votes[a] || {}).map(Number))
   )].map(Number);
 
-  // Also include the manual_leader_round if it exists (may have no votes yet)
   const manualRound = c?.manual_leader_round || 0;
   const allRounds = [...new Set([...voteRounds, ...(manualRound > 0 ? [manualRound] : [])])].sort((a, b) => a - b);
 
@@ -902,39 +900,44 @@ function renderRoundLeaderView(constId) {
 
   const latestRound = Math.max(...allRounds);
 
+  // ── Party totals across all rounds ──────────────────────────────────────
+  const partyTotals = {};
+  AK.forEach(a => {
+    partyTotals[a] = Object.values(votes[a] || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+  });
+  const grandTotal = Object.values(partyTotals).reduce((s, v) => s + v, 0);
+  const hasAnyVotes = grandTotal > 0;
+
+  // ── Round table ─────────────────────────────────────────────────────────
   let html = '<div style="overflow-x:auto"><table class="round-tbl"><thead><tr><th>சுற்று</th>';
   AK.forEach(a => html += `<th style="color:${PARTIES[a].color}">${PARTIES[a].name}</th>`);
   html += '<th style="color:var(--gold)">முன்னிலை</th><th style="color:var(--green)">வித்தியாசம்</th></tr></thead><tbody>';
 
   allRounds.forEach(round => {
-    // Votes for this specific round (not cumulative — per-round view)
     const roundVotes = {};
     AK.forEach(a => { roundVotes[a] = (votes[a] || {})[round] || 0; });
     const totalVotes = Object.values(roundVotes).reduce((s, v) => s + v, 0);
 
-    // Leading party: use manual_leader if this is the manual round, else derive from votes
     let leadingParty, isManualRow;
     if (round === manualRound && c?.manual_leader) {
-      leadingParty  = c.manual_leader;
-      isManualRow   = totalVotes === 0; // manual-only if no votes
+      leadingParty = c.manual_leader;
+      isManualRow  = totalVotes === 0;
     } else if (totalVotes > 0) {
-      leadingParty  = Object.entries(roundVotes).sort(([, a], [, b]) => b - a)[0][0];
-      isManualRow   = false;
+      leadingParty = Object.entries(roundVotes).sort(([, a], [, b]) => b - a)[0][0];
+      isManualRow  = false;
     } else {
-      return; // skip rounds with no data at all
+      return;
     }
 
-    const p      = PARTIES[leadingParty];
+    const p        = PARTIES[leadingParty];
     const isLatest = round === latestRound;
 
-    // Margin — only if votes exist
     let marginHtml;
     if (totalVotes > 0) {
-      const sorted = Object.entries(roundVotes).sort(([, a], [, b]) => b - a);
-      const leadV  = roundVotes[leadingParty] || sorted[0][1];
-      const secondV = sorted.find(([k]) => k !== leadingParty)?.[1] || 0;
-      const margin = leadV - secondV;
-      marginHtml = `<span style="color:var(--green);font-weight:700">+${margin.toLocaleString('en-IN')}</span>`;
+      const sorted   = Object.entries(roundVotes).sort(([, a], [, b]) => b - a);
+      const leadV    = roundVotes[leadingParty] || sorted[0][1];
+      const secondV  = sorted.find(([k]) => k !== leadingParty)?.[1] || 0;
+      marginHtml = `<span style="color:var(--green);font-weight:700">+${(leadV - secondV).toLocaleString('en-IN')}</span>`;
     } else {
       marginHtml = `<span style="color:var(--muted)">—</span>`;
     }
@@ -944,7 +947,7 @@ function renderRoundLeaderView(constId) {
     AK.forEach(a => {
       const v      = roundVotes[a];
       const isLead = a === leadingParty;
-      html += `<td style="font-weight:${isLead?700:400};color:${isLead?PARTIES[a].color:'var(--text2)'}">
+      html += `<td style="font-weight:${isLead ? 700 : 400};color:${isLead ? PARTIES[a].color : 'var(--text2)'}">
         ${v > 0 ? v.toLocaleString('en-IN') : '—'}
       </td>`;
     });
@@ -957,6 +960,45 @@ function renderRoundLeaderView(constId) {
   });
 
   html += '</tbody></table></div>';
+
+  // ── Party Totals Section (only if any votes exist) ──────────────────────
+  if (hasAnyVotes) {
+    const maxTotal = Math.max(...Object.values(partyTotals));
+
+    html += `
+      <div style="margin-top:10px;background:rgba(232,185,74,.05);border:1px solid rgba(232,185,74,.2);border-radius:7px;padding:10px 12px;">
+        <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:9px;">
+          📊 மொத்த வாக்கு — All Rounds Total
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          ${AK.map(a => {
+            const total = partyTotals[a];
+            if (total === 0) return ''; // skip parties with zero votes
+            const pct   = maxTotal > 0 ? (total / maxTotal * 100).toFixed(1) : 0;
+            const pctOfAll = grandTotal > 0 ? (total / grandTotal * 100).toFixed(1) : 0;
+            const p     = PARTIES[a];
+            return `
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="width:55px;font-size:11px;color:${p.color};font-weight:700;flex-shrink:0;">${p.name}</div>
+                <div style="flex:1;background:var(--bg3);border-radius:4px;height:10px;overflow:hidden;">
+                  <div style="width:${pct}%;height:100%;background:${p.color};border-radius:4px;transition:width .6s ease;"></div>
+                </div>
+                <div style="width:70px;text-align:right;font-size:11px;font-weight:700;color:${p.color};flex-shrink:0;">
+                  ${total.toLocaleString('en-IN')}
+                </div>
+                <div style="width:38px;text-align:right;font-size:10px;color:var(--muted);flex-shrink:0;">
+                  ${pctOfAll}%
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+        <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:11px;">
+          <span style="color:var(--muted)">மொத்தம் (Grand Total)</span>
+          <span style="color:var(--text);font-weight:700;">${grandTotal.toLocaleString('en-IN')}</span>
+        </div>
+      </div>`;
+  }
+
   container.innerHTML = html;
 }
 
