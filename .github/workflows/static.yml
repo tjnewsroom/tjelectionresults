@@ -34,9 +34,9 @@ jobs:
       - name: Inject Supabase credentials into HTML files
         run: |
           sed -i "s|%%SUPABASE_URL%%|${{ secrets.SUPABASE_URL }}|g" login.html
-          sed -i "s|%%SUPABASE_URL%%|${{ secrets.SUPABASE_URL }}|g" index.html
+          sed -i "s|%%SUPABASE_URL%%|${{ secrets.SB_URL }}|g" index.html
           sed -i "s|%%SUPABASE_ANON_KEY%%|${{ secrets.SUPABASE_ANON_KEY }}|g" login.html
-          sed -i "s|%%SUPABASE_ANON_KEY%%|${{ secrets.SUPABASE_ANON_KEY }}|g" index.html
+          sed -i "s|%%SUPABASE_ANON_KEY%%|${{ secrets.SB_KEY }}|g" index.html
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
