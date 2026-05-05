@@ -415,7 +415,14 @@ const SUPABASE_ANON_KEY = "%%SUPABASE_ANON_KEY%%";
 
 
 const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+///const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+
+// At the top where you create the client
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  db: { schema: 'public' },
+  global: { headers: { 'Range-Unit': 'items', 'Range': '0-99999' } }
+});
 
 const PARTIES = {
   admk: {name:'ADMK+', color:'#00B050'},
@@ -508,20 +515,42 @@ async function bootApp() {
 // ── LOAD DATA ───────────────────────────────────────────
 async function loadData() {
   try {
-    const [{ data: cs, error: e1 }, { data: pv, error: e2 }] = await Promise.all([
-      sb.from('constituencies_latest').select('id,name,district,status,manual_leader,manual_leader_round').order('id'),
-      sb.from('party_votes').select('constituency_id,round,alliance,votes').order('constituency_id').order('round')
-    ]);
-    if (e1) throw e1; if (e2) throw e2;
+    // Fetch constituencies (≤234 rows, safe)
+    const { data: cs, error: e1 } = await sb
+      .from('constituencies_latest')
+      .select('id,name,district,status,manual_leader,manual_leader_round')
+      .order('id');
+    if (e1) throw e1;
+
+    // Paginate party_votes — fetch all pages until empty
+    let allVotes = [];
+    let from = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data: pv, error: e2 } = await sb
+        .from('party_votes')
+        .select('constituency_id,round,alliance,votes')
+        .order('constituency_id')
+        .order('round')
+        .range(from, from + PAGE - 1);
+      if (e2) throw e2;
+      if (!pv || pv.length === 0) break;
+      allVotes = allVotes.concat(pv);
+      if (pv.length < PAGE) break;   // last page
+      from += PAGE;
+    }
+
     constituencies = cs || [];
     partyVotes = {};
-    (pv || []).forEach(r => {
+    allVotes.forEach(r => {
       if (!partyVotes[r.constituency_id]) partyVotes[r.constituency_id] = {};
       if (!partyVotes[r.constituency_id][r.alliance]) partyVotes[r.constituency_id][r.alliance] = {};
       partyVotes[r.constituency_id][r.alliance][r.round] = r.votes;
     });
+
     document.getElementById('lastUpdate').textContent =
-      new Date().toLocaleTimeString('ta-IN', {hour12: false});
+      new Date().toLocaleTimeString('ta-IN', { hour12: false });
+
   } catch(e) { showToast('தரவு பிழை: ' + e.message, 'err'); }
 }
 
@@ -1264,38 +1293,139 @@ function quickEntry(id) {
 
 // ── SUMMARY ─────────────────────────────────────────────
 function renderSummary() {
-  const seats = {dmk:0, admk:0, tvk:0, ntk:0, oth:0};
+  const seats = { admk: 0, dmk: 0, tvk: 0, ntk: 0, oth: 0 };
   constituencies.forEach(c => {
     const l = getLeader(c.id);
-    if (c.status !== 'pending' && l) seats[l.leading] = (seats[l.leading] || 0) + 1;
+    if (l) seats[l.leading] = (seats[l.leading] || 0) + 1;
   });
-  document.getElementById('sumChart').innerHTML = `
-    <div class="chart-bar-track">
-      ${Object.entries(seats).map(([k, v]) =>
-        v > 0 ? `<div class="chart-bar-seg" title="${PARTIES[k].name}: ${v}" style="width:${(v/234*100).toFixed(1)}%;background:${PARTIES[k].color}"></div>` : ''
-      ).join('')}
+
+  const total = Object.values(seats).reduce((s, v) => s + v, 0);
+
+  // ── Bar chart HTML ──
+/*  const chartRows = Object.entries(seats)
+    .sort(([, a], [, b]) => b - a)
+    .map(([k, v]) => {
+      const p = PARTIES[k];
+      const pct = total > 0 ? ((v / 234) * 100).toFixed(1) : 0;
+      return `
+        <div style="display:grid;grid-template-columns:60px 1fr 48px;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:12px;font-weight:700;color:${p.color};text-align:right">${p.name}</span>
+          <div style="background:var(--bg3);border-radius:4px;height:26px;overflow:hidden;position:relative">
+            <div style="width:${pct}%;background:${p.color};height:100%;border-radius:4px;transition:width .8s ease;min-width:${v > 0 ? 4 : 0}px"></div>
+            ${v > 0 ? `<span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:11px;font-weight:700;color:#fff;mix-blend-mode:difference">${v} தொகுதி</span>` : ''}
+          </div>
+          <span style="font-size:13px;font-weight:700;color:${p.color}">${v}</span>
+        </div>`;
+    }).join('');*/
+
+
+  // ── Vertical Bar Chart ──
+const maxSeats = Math.max(...Object.values(seats), 1);
+const chartHeight = 160;
+
+const barCols = Object.entries(seats)
+  .sort(([, a], [, b]) => b - a)
+  .map(([k, v]) => {
+    const p = PARTIES[k];
+    const barH = v > 0 ? Math.max((v / maxSeats) * chartHeight, 6) : 0;
+    const pct = ((v / 234) * 100).toFixed(1);
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+        <span style="font-size:12px;font-weight:700;color:${p.color}">${v > 0 ? v : ''}</span>
+        <div style="width:100%;height:${chartHeight}px;display:flex;align-items:flex-end;justify-content:center">
+          <div style="width:70%;background:${p.color};height:${barH}px;border-radius:4px 4px 0 0;transition:height .8s ease;position:relative;min-height:${v > 0 ? 4 : 0}px"></div>
+        </div>
+        <span style="font-size:11px;font-weight:700;color:${p.color}">${p.name}</span>
+        <span style="font-size:10px;color:var(--muted)">${v > 0 ? pct + '%' : '—'}</span>
+      </div>`;
+  }).join('');
+
+document.getElementById('sumChart').innerHTML = `
+  <div style="display:flex;align-items:flex-end;gap:4px;padding:8px 0 0;border-bottom:2px solid var(--border);position:relative">
+    <div style="position:absolute;left:0;right:0;bottom:${((118/234)*chartHeight).toFixed(0)}px;border-top:2px dashed var(--gold);opacity:.6;pointer-events:none">
+      <span style="position:absolute;right:4px;top:-16px;font-size:9px;color:var(--gold);font-weight:700">118 பெரும்பான்மை</span>
     </div>
-    <div class="chart-legend">
-      ${Object.entries(seats).map(([k, v]) =>
-        `<div class="leg-item"><div class="party-dot" style="background:${PARTIES[k].color}"></div><b style="color:${PARTIES[k].color}">${PARTIES[k].name}</b>: ${v}</div>`
-      ).join('')}
+    ${barCols}
+  </div>
+  <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px;font-size:11px">
+    ${Object.entries(seats).map(([k, v]) => `
+      <div style="display:flex;align-items:center;gap:5px">
+        <span style="width:9px;height:9px;border-radius:2px;background:${PARTIES[k].color};display:inline-block"></span>
+        <span style="color:var(--text2)">${PARTIES[k].name}</span>
+        <span style="font-weight:700;color:${PARTIES[k].color}">${v}</span>
+      </div>`).join('')}
+  </div>`;
+
+  const majority = 118;
+  const majorityPct = ((majority / 234) * 100).toFixed(1);
+
+  document.getElementById('sumChart').innerHTML = `
+    <div style="margin-bottom:16px">
+      ${chartRows}
+    </div>
+    <div style="position:relative;background:var(--bg3);border-radius:4px;height:6px;margin-bottom:6px">
+      <div style="display:flex;height:100%;border-radius:4px;overflow:hidden">
+        ${Object.entries(seats).filter(([,v]) => v > 0).sort(([,a],[,b]) => b-a).map(([k,v]) =>
+          `<div style="width:${((v/234)*100).toFixed(1)}%;background:${PARTIES[k].color};height:100%"></div>`
+        ).join('')}
+      </div>
+      <div style="position:absolute;top:-4px;left:${majorityPct}%;width:2px;height:14px;background:var(--text);border-radius:1px;opacity:.7"></div>
+      <div style="position:absolute;top:14px;left:${majorityPct}%;transform:translateX(-50%);font-size:10px;color:var(--muted);white-space:nowrap">பெரும்பான்மை 118</div>
+    </div>
+    <div style="margin-top:28px;display:flex;flex-wrap:wrap;gap:10px;font-size:11px">
+      ${Object.entries(seats).map(([k,v]) => `
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="width:9px;height:9px;border-radius:50%;background:${PARTIES[k].color};display:inline-block"></span>
+          <span style="color:var(--text2)">${PARTIES[k].name}</span>
+          <span style="font-weight:700;color:${PARTIES[k].color}">${v}</span>
+          <span style="color:var(--muted)">(${total > 0 ? ((v/234)*100).toFixed(1) : 0}%)</span>
+        </div>`).join('')}
     </div>`;
 
-  const top = constituencies
+  // ── Top constituencies — sorted by leading party then margin ──
+  const active = constituencies
     .filter(c => c.status !== 'pending')
-    .map(c => { const l = getLeader(c.id); return l ? {c, l} : null; })
-    .filter(Boolean).sort((a, b) => b.l.margin - a.l.margin).slice(0, 10);
+    .map(c => { const l = getLeader(c.id); return l ? { c, l } : null; })
+    .filter(Boolean)
+    .sort((a, b) => {
+      // Primary: group by party (by seat count desc)
+      const partySeatA = seats[a.l.leading] || 0;
+      const partySeatB = seats[b.l.leading] || 0;
+      if (partySeatB !== partySeatA) return partySeatB - partySeatA;
+      // Secondary: within same party, sort by margin desc
+      return (b.l.margin || 0) - (a.l.margin || 0);
+    });
 
-  document.getElementById('topConst').innerHTML = top.length
-    ? top.map(({c, l}, i) => {
-        const p = PARTIES[l.leading];
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-          <span style="color:var(--muted);font-size:11px;width:18px">${i+1}</span>
-          <span style="flex:1;font-weight:600">${c.name}</span>
-          <span class="party-dot" style="background:${p.color}"></span>
-          <span style="color:${p.color};font-weight:700;font-size:12px;width:55px">${p.name}</span>
-          <span style="color:var(--green);font-weight:700;width:65px;text-align:right">+${l.margin.toLocaleString('en-IN')}</span>
-        </div>`;
+  // Group by party
+  const grouped = {};
+  active.forEach(({ c, l }) => {
+    if (!grouped[l.leading]) grouped[l.leading] = [];
+    grouped[l.leading].push({ c, l });
+  });
+
+  const partyOrder = Object.entries(seats).sort(([,a],[,b]) => b - a).map(([k]) => k);
+
+  document.getElementById('topConst').innerHTML = active.length
+    ? partyOrder.filter(k => grouped[k]?.length).map(k => {
+        const p = PARTIES[k];
+        const rows = grouped[k].slice(0, 8);
+        return `
+          <div style="margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;padding-bottom:5px;border-bottom:2px solid ${p.color}">
+              <span style="width:10px;height:10px;border-radius:50%;background:${p.color}"></span>
+              <span style="font-weight:700;color:${p.color};font-size:13px">${p.name}</span>
+              <span style="background:${p.color}22;color:${p.color};font-size:11px;font-weight:700;padding:1px 8px;border-radius:4px;border:1px solid ${p.color}44">${seats[k]} தொகுதி</span>
+            </div>
+            ${rows.map(({ c, l }, i) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)">
+                <span style="color:var(--muted);font-size:10px;width:16px">${i + 1}</span>
+                <span style="flex:1;font-size:12px;font-weight:600;color:var(--text)">${c.name}</span>
+                <span style="font-size:10px;color:var(--muted);margin-right:8px">${c.district}</span>
+                ${l.margin > 0
+                  ? `<span style="color:var(--green);font-weight:700;font-size:12px">+${l.margin.toLocaleString('en-IN')}</span>`
+                  : `<span style="color:var(--muted);font-size:11px">📌 முன்னிலை</span>`}
+              </div>`).join('')}
+          </div>`;
       }).join('')
     : '<div style="color:var(--muted);text-align:center;padding:20px">Data entry பிறகு காட்டும்</div>';
 }
